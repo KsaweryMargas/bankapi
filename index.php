@@ -8,6 +8,7 @@ require_once('model/Account.php');
 require_once('model/User.php');
 //model tokena
 require_once('model/Token.php');
+require_once('model/Transfer.php');
 
 //połączenie do bazy danych
 //TODO: wyodrębnić zmienne dotyczące środowiska do pliku konfiguracyjnego
@@ -55,6 +56,33 @@ Route::add('/login', function() use($db) {
   
 }, 'post');
 
+//metoda zwracająca do aplikacji szczegóły rachunku 
+//metoda identyfikuje użytkownika na podstawie tokenu
+//sprawdza w bazie i zwraca dane pierwszego znalezionego rachunku
+Route::add('/account/details', function() use($db) {
+    //zakładamy, że aplikacja przekazała nam token w postaci danych JSON
+    //przeczytaj surowe dane wejściowe z PHP
+    $data = file_get_contents('php://input');
+    //przekształć JSON wejściowe w tablicę asocjacyjną
+    $dataArray = json_decode($data, true);
+    //zakładam, ze w paczce danych jest token pod nazwą "token"
+    $token = $dataArray['token'];
+    //sprawdz poprawność tokena
+    if(!Token::check($token, $_SERVER['REMOTE_ADDR'], $db)) {
+        //jeżeli token jest niepoprawny to zwróć błąd
+        header('HTTP/1.1 401 Unauthorized');
+        //opcjonalnie
+        return json_encode(['error' => 'Invalid token']);
+    }
+    //pobierz id użytkownika na podstawie tokena
+    $userId = Token::getUserId($token, $db);
+    //wyciągamy numer rachunku i zwracamy go jako json
+    $accountNo = Account::getAccountNo($userId, $db);
+    $account = Account::getAccount($accountNo, $db);
+    header('Content-Type: application/json');
+    return json_encode($account->getArray());
+}, 'post');
+
 //ścieżka wyświetla dane dotyczące rachunku bankowego po jego numerze
 //jeżeli ktoś zapyta API o /account/1234 to zwróci dane rachunku o numerze 1234
 //klasa Route podstawia argumenty z URL (wyrażenie regularne) do funkcji
@@ -67,6 +95,41 @@ Route::add('/account/([0-9]*)', function($accountNo) use($db) {
     //zwróć dane w formacie JSON korzystając z funkcji udostępniającej dane prywatne jako tablicę
     return json_encode($account->getArray());
 });
+
+//endpoint do wykonywania przelewów
+Route::add('/transfer/new', function() use($db) {
+  //zakładamy, że aplikacja przekazała nam token w postaci danych JSON
+  //przeczytaj surowe dane wejściowe z PHP
+  $data = file_get_contents('php://input');
+  //przekształć JSON wejściowe w tablicę asocjacyjną
+  $dataArray = json_decode($data, true);
+  //zakładam, ze w paczce danych jest token pod nazwą "token"
+  $token = $dataArray['token'];
+  //sprawdz poprawność tokena
+  if(!Token::check($token, $_SERVER['REMOTE_ADDR'], $db)) {
+      //jeżeli token jest niepoprawny to zwróć błąd
+      header('HTTP/1.1 401 Unauthorized');
+      //opcjonalnie
+      return json_encode(['error' => 'Invalid token']);
+  }
+  
+  $userId = Token::getUserId($token, $db);
+  $source = Account::getAccountNo($userId, $db);
+  $target = $dataArray['target'];
+  $amount = $dataArray['amount'];
+
+  // Sprawdzenie, czy kwota przelewu jest dodatnia i większa od zera
+  if ($amount < 0) {
+      header('HTTP/1.1 400 Bad Request');
+      return json_encode(['error' => 'Kwota przelewu musi być większa od zera']);
+  }
+
+  //TODO: wykonaj przelew
+  Transfer::new($source, $target, $amount, $db);
+  header('Status: 200');
+  return json_encode(['status' => 'OK']);
+}, 'post');
+
 
 //ta linijka musi być na końcu
 //musi tu być nazwa folderu w którym "mieszka" API
